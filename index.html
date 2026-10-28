@@ -201,6 +201,15 @@ td.r,th.r{text-align:right}
 .swatch.on{border-color:var(--fg)}
 .whoami{display:inline-flex;align-items:center;gap:8px;background:var(--surface-2);border:0;border-radius:999px;padding:4px 12px 4px 4px;font-weight:800;color:var(--fg);font-size:14px}
 .hist td:first-child{white-space:nowrap;color:var(--muted)}
+/* figures */
+.fig{display:block;width:100%;height:auto;margin:0 auto 14px;font-family:var(--font)}
+.hit{cursor:pointer}
+.hit circle:not(.area){transition:r .15s,fill .15s}
+.hit.sel circle:not(.area){fill:var(--accent)}
+.hit.sel .mark{r:7px}
+.hit.ok circle:not(.area){fill:var(--accent)}.hit.ok .mark{r:7px}
+.hit.bad circle:not(.area){fill:var(--heart)}.hit.bad .mark{r:7px}
+.hint{color:var(--muted);font-size:14px;font-weight:700;margin-bottom:8px}
 /* keypad */
 .keypad{display:none;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px;max-width:360px}
 .keypad.show{display:grid}
@@ -336,13 +345,14 @@ function words(n){if(n===0)return 'ноль';const parts=[];const mil=Math.floor
 
 /* ---------- task builders ---------- */
 // task: {kind:'input'|'choice'|'order', q, answer, options?, explain, unit?, accept?}
+const mk=o=>{o.withFig=function(f){this.q=f+this.q;return this};return o};
 const T={
-  input:(q,answer,explain,unit)=>({kind:'input',q,answer:String(answer),explain,unit}),
+  input:(q,answer,explain,unit)=>mk({kind:'input',q,answer:String(answer),explain,unit}),
   choice:(q,correct,distractors,explain,wide)=>{const set=[];[correct,...distractors].forEach(o=>{const s=String(o);if(!set.includes(s))set.push(s)});
-    return {kind:'choice',q,answer:String(correct),options:shuffle(set.slice(0,4)),explain,wide}},
-  order:(q,items,explain)=>({kind:'order',q,answer:items.map(String).join('|'),items:shuffle(items.map(String)),explain}),
+    return mk({kind:'choice',q,answer:String(correct),options:shuffle(set.slice(0,4)),explain,wide})},
+  order:(q,items,explain)=>mk({kind:'order',q,answer:items.map(String).join('|'),items:shuffle(items.map(String)),explain}),
 };
-const bool=(q,isTrue,explain)=>({kind:'choice',q,answer:isTrue?'Верно':'Неверно',options:['Верно','Неверно'],explain});
+const bool=(q,isTrue,explain,fig='')=>mk({kind:'choice',q:fig+q,answer:isTrue?'Верно':'Неверно',options:['Верно','Неверно'],explain});
 const placeNames={1:'единиц',10:'десятков',100:'сотен',1000:'единиц тысяч',10000:'десятков тысяч',100000:'сотен тысяч',1000000:'единиц миллионов'};
 const roundNames={10:'десятков',100:'сотен',1000:'тысяч',10000:'десятков тысяч',100000:'сотен тысяч'};
 const near=(n,spread)=>{const s=new Set();let guard=0;while(s.size<3&&guard++<50){const d=n+ri(-spread,spread);if(d!==n&&d>=0)s.add(d)}return [...s]};
@@ -536,16 +546,163 @@ function divExplain(n,d){const s=String(n);const sum=s.split('').reduce((a,c)=>a
   if(d===10)return `<p>Последняя цифра — ${last}. На 10 делятся только числа, оканчивающиеся на 0. Значит <b>${ok?'делится':'не делится'}</b>.</p>`;
   return `<p>Сумма цифр: ${s.split('').join(' + ')} = ${sum}. ${sum} ${ok?'делится':'не делится'} на ${d}, значит и число <b>${ok?'делится':'не делится'}</b> на ${d}.</p>`}
 
+/* ---------- геометрия и §1: чертежи (SVG) и генераторы ---------- */
+const LET=['A','B','C','D','K','M','N','P','T','E','F','S','L','R','H'];
+const raz=k=>k>=2&&k<=4?'раза':'раз';
+const letters=n=>shuffle(LET).slice(0,n);
+const svg=(w,h,inner)=>`<svg class="fig" viewBox="0 0 ${w} ${h}" style="max-width:${w}px" xmlns="http://www.w3.org/2000/svg" font-size="17" font-weight="800">${inner}</svg>`;
+const ln=(x1,y1,x2,y2,c='var(--info)',w=3)=>`<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="${c}" stroke-width="${w}" stroke-linecap="round"/>`;
+const dot=(x,y)=>`<circle cx="${x}" cy="${y}" r="4.5" fill="var(--fg)"/>`;
+const txt=(x,y,s,anchor='middle')=>`<text x="${x}" y="${y}" fill="var(--fg)" text-anchor="${anchor}" font-style="italic">${s}</text>`;
+const pt=(x,y,l,dy=-11,dx=0)=>dot(x,y)+txt(x+dx,y+dy,l);
+const hit=(x,y,v,l,dy=-11)=>`<g class="hit" data-v="${v}"><circle class="area" cx="${x}" cy="${y}" r="16" fill="transparent"/>${dot(x,y)}${l!=null?txt(x,y+dy,l):''}</g>`;
+const arrow=(x,y,dir=1)=>`<path d="M${x} ${y} l${-10*dir} -6 v12 z" fill="var(--info)"/>`;
+// лежит ли точка на отрезке/луче/прямой — считаем по индексам позиций вдоль прямой
+const pickTask=(q,answer,explain,fig)=>({kind:'pick',q:fig+q,answer:String(answer),explain});
+function lineFig(opts){ // точки на горизонтальной прямой y=70 и вне её
+  const {on=[],off=[],kind='line',a=null,b=null,name=null}=opts;const y=70;const xs=i=>60+i*70;
+  let s='';
+  if(kind==='line')s+=ln(15,y,385,y);
+  else if(kind==='segment')s+=ln(xs(a),y,xs(b),y);
+  else if(kind==='ray')s+=ln(xs(a),y,392,y)+arrow(392,y);
+  if(name)s+=txt(380,y-12,name);
+  for(const p of on)s+=(p.hit?hit(xs(p.i),y,p.l,p.l):pt(xs(p.i),y,p.l));
+  for(const p of off)s+=(p.hit?hit(p.x,p.y,p.l,p.l):pt(p.x,p.y,p.l));
+  return svg(400,140,s)}
+
+/* §1 Как решать задачу */
+GEN.p1=[
+  ()=>{const [a,b]=[ri(20,90),ri(2,9)];const forms=[
+    ['на сколько число a больше числа b','a − b',['a + b','a : b','a · b']],
+    ['во сколько раз число a больше числа b','a : b',['a − b','a · b','b − a']],
+    ['число, которое на b больше числа a','a + b',['a − b','a · b','a : b']],
+    ['число, которое в b раз меньше числа a','a : b',['a − b','a · b','b − a']],
+    ['число, которое в b раз больше числа a','a · b',['a + b','a : b','a − b']],
+    ['число, которое на b меньше числа a','a − b',['a + b','a : b','b − a']]];
+    const f=pick(forms);return T.choice(`Какое действие нужно выполнить, чтобы найти <b>${f[0]}</b>?`,f[1],f[2],`<p>«На … больше/меньше» — это сложение или вычитание, «в … раз больше/меньше» — умножение или деление. «На сколько больше» — вычитаем из большего меньшее, «во сколько раз» — делим большее на меньшее.</p><p>Ответ: <b>${f[1]}</b>.</p>`)},
+  ()=>{const a=ri(5,40),k=ri(2,5);const items=pick([['В первом ящике','кг груш','во втором','в двух ящиках'],['В первой корзине','кг яблок','во второй','в двух корзинах'],['На первой полке','книг','на второй','на двух полках']]);
+    const more=ri(0,1);const b=more?a*k:a+ri(3,30);const d=more?k:b-a;
+    return T.input(`${items[0]} ${a} ${items[1]}, ${items[2]} — ${more?`в ${d} ${raz(d)} больше`:`на ${d} больше`}. Сколько ${items[1]} ${items[3]}?`,a+b,
+      `<p>1) ${more?`${a} · ${d} = ${b}`:`${a} + ${d} = ${b}`} — ${items[2]};</p><p>2) ${a} + ${b} = <b>${a+b}</b> — ${items[3]}.</p><p>Сначала находим неизвестное значение, потом отвечаем на главный вопрос задачи.</p>`)},
+  ()=>{const a=ri(6,30);const k=pick([2,3]);const b=a*k;const c=a+b;return T.input(`За первый день волонтёры посадили ${a} кустов роз, за второй — в ${k} ${raz(k)} больше, а за третий — столько, сколько за первый и второй дни вместе. Сколько всего кустов посадили за три дня?`,a+b+c,
+    `<p>1) ${a} · ${k} = ${b} (к.) — за 2-й день;</p><p>2) ${a} + ${b} = ${c} (к.) — за 3-й день;</p><p>3) ${a} + ${b} + ${c} = <b>${a+b+c}</b> (к.) — за три дня.</p>`)},
+  ()=>{const b=ri(3,12),d=ri(2,9);const a=b+d;return T.input(`Длина комнаты прямоугольной формы на ${d} м больше её ширины. Найди площадь комнаты, если её ширина равна ${b} м.`,a*b,
+    `<p>1) ${b} + ${d} = ${a} (м) — длина комнаты;</p><p>2) S = a · b = ${a} · ${b} = <b>${a*b}</b> (м²).</p><p>Чтобы найти площадь, нужны обе стороны; длины в условии нет — её находим первым действием.</p>`,'м²')},
+  ()=>{const s=ri(4,12)*ri(2,8),t=ri(2,8);const v1=Math.round(s/t)||1;const d=ri(1,Math.max(1,v1-1));const S=v1*t;return T.input(`Первая группа туристов проплыла на байдарках ${S} км за ${t} ч. Вторая группа шла по берегу. Какова скорость второй группы, если она на ${d} км/ч меньше скорости первой?`,v1-d,
+    `<p>1) ${S} : ${t} = ${v1} (км/ч) — скорость первой группы (v = s : t);</p><p>2) ${v1} − ${d} = <b>${v1-d}</b> (км/ч) — скорость второй группы.</p>`,'км/ч')},
+  ()=>{const d=ri(3,30);const mode=ri(0,1);const st=mode?[`одно число больше другого на ${d}`,true]:[`одно число меньше другого в ${d} ${raz(d)}`,false];
+    return bool(`Разность двух чисел равна ${d}. Верно ли, что ${st[0]}?`,st[1],`<p>Разность показывает, <b>на сколько</b> одно число больше другого. «Во сколько раз» показывает частное, а не разность.</p>`)},
+  ()=>{const q=ri(2,9);const mode=ri(0,1);const st=mode?[`одно число больше другого в ${q} ${raz(q)}`,true]:[`одно число больше другого на ${q}`,false];
+    return bool(`Частное двух чисел равно ${q}. Верно ли, что ${st[0]}?`,st[1],`<p>Частное показывает, <b>во сколько раз</b> одно число больше другого. «На сколько» показывает разность.</p>`)},
+];
+
+/* §4 Точка, прямая, луч, отрезок */
+GEN.p4=[
+  ()=>{const L=letters(5);const onIdx=shuffle([0,1,2,3,4]).slice(0,3).sort();const on=onIdx.map((i,k)=>({i,l:L[k],hit:true}));
+    const off=[{x:ri(90,330),y:ri(18,38),l:L[3],hit:true},{x:ri(90,330),y:ri(104,124),l:L[4],hit:true}];const name='a';
+    const ask=ri(0,1);const ans=ask?pick(off).l:pick(on).l;
+    return pickTask(`<p>Нажми на точку, которая <b>${ask?'не принадлежит':'принадлежит'}</b> прямой a.</p>`,ans,`<p>Точки ${on.map(p=>p.l).join(', ')} лежат на прямой a, точки ${off.map(p=>p.l).join(', ')} — нет.</p>`,lineFig({on,off,name}))},
+  ()=>{const L=letters(4);const a=0,b=3;const k=pick([1,2,4]);const inside=k<=b&&k>=a;
+    const on=[{i:a,l:L[0]},{i:b,l:L[1]},{i:k,l:L[2]}];
+    const fig=svg(400,140,ln(15,70,385,70,'var(--line)',2)+ln(60,70,270,70)+on.map(p=>pt(60+p.i*70,70,p.l)).join(''));
+    return bool(`Принадлежит ли точка ${L[2]} отрезку ${L[0]}${L[1]}?`,inside,`<p>Отрезок ${L[0]}${L[1]} — часть прямой между точками ${L[0]} и ${L[1]} (включая концы). Точка ${L[2]} лежит ${inside?'между ними, значит <b>принадлежит</b> отрезку':'на прямой, но вне отрезка, значит <b>не принадлежит</b> отрезку'}.</p>`,fig)},
+  ()=>{const L=letters(3);const o=1;const k=pick([0,2,3,4]);const onRay=k>o;
+    const fig=svg(400,140,ln(15,70,385,70,'var(--line)',2)+ln(60+o*70,70,392,70)+arrow(392,70)+pt(60+o*70,70,L[0])+pt(60+3*70,70,L[1])+pt(60+k*70,70,L[2]));
+    return bool(`Точка ${L[0]} — начало луча ${L[0]}${L[1]}. Принадлежит ли точка ${L[2]} лучу ${L[0]}${L[1]}?`,onRay,`<p>Луч начинается в точке ${L[0]} и идёт бесконечно в сторону ${L[1]}. Точка ${L[2]} находится ${onRay?`с той же стороны от ${L[0]}, что и ${L[1]}, значит <b>принадлежит</b> лучу`:`с другой стороны от начала луча, значит <b>не принадлежит</b> лучу`}.</p>`,fig)},
+  ()=>{const n=ri(3,5);const L=letters(n);const on=L.map((l,i)=>({i,l}));const ans=n*(n-1)/2;
+    return T.input(`На прямой отмечены точки ${L.join(', ')}. Сколько отрезков с концами в этих точках получилось?`,ans,`<p>Каждая пара точек даёт один отрезок. Пар из ${n} точек: ${n} · ${n-1} : 2 = <b>${ans}</b>.</p>${n===3?`<p>Это отрезки ${L[0]}${L[1]}, ${L[1]}${L[2]} и ${L[0]}${L[2]}.</p>`:''}`,'').withFig(lineFig({on}))},
+  ()=>{const n=ri(1,3);const L=letters(n);const on=L.map((l,i)=>({i:i+1,l}));const ans=2*n;
+    return T.input(`На прямой отмечены ${n===1?'точка':'точки'} ${L.join(', ')}. Сколько лучей с началом в ${n===1?'этой точке':'этих точках'} получилось?`,ans,`<p>Каждая точка на прямой делит её на два луча. ${n} · 2 = <b>${ans}</b>.</p>`,'').withFig(lineFig({on}))},
+  ()=>{const L=letters(2);const kind=pick(['line','segment','ray']);const names={line:`прямая ${L[0]}${L[1]}`,segment:`отрезок ${L[0]}${L[1]}`,ray:`луч ${L[0]}${L[1]}`};
+    const fig=lineFig({kind,a:1,b:3,on:[{i:1,l:L[0]},{i:3,l:L[1]}]});
+    return T.choice(`Что изображено на чертеже?`,names[kind],Object.values(names).filter(x=>x!==names[kind]),`<p>Прямая бесконечна в обе стороны, луч имеет начало и бесконечен в одну сторону (стрелка), отрезок ограничен двумя концами.</p><p>Здесь — <b>${names[kind]}</b>.</p>`).withFig(fig)},
+  ()=>T.choice(`Сколько различных прямых можно провести через две различные точки?`,'одну',['две','ни одной','бесконечно много'],`<p>Через две различные точки можно провести <b>только одну</b> прямую.</p>`),
+  ()=>{const L=letters(4);const cross=ri(0,1)===1;const y2=cross?[25,115]:[20,55];
+    const fig=svg(400,140,ln(15,70,385,70)+txt(375,58,'m')+ln(170,y2[0],230,y2[1],'var(--heart)')+pt(170,y2[0],L[0])+pt(230,y2[1],L[1],18));
+    return bool(`Пересекает ли отрезок ${L[0]}${L[1]} прямую m?`,cross,`<p>Отрезок пересекает прямую, если у них есть общая точка. ${cross?`Отрезок ${L[0]}${L[1]} проходит через прямую m — <b>пересекает</b>.`:`Оба конца отрезка ${L[0]}${L[1]} лежат по одну сторону от прямой m — <b>не пересекает</b>.`}</p>`,fig)},
+];
+
+/* §5 Измерение отрезков */
+const UNITS={мм:1,см:10,дм:100,м:1000,км:1000000};
+GEN.p5=[
+  ()=>{const pairs=[['см','мм'],['дм','см'],['м','см'],['м','дм'],['км','м'],['дм','мм'],['м','мм']];const [a,b]=pick(pairs);const n=ri(2,45);const k=UNITS[a]/UNITS[b];
+    return T.input(`Вырази в ${b==='мм'?'миллиметрах':b==='см'?'сантиметрах':b==='дм'?'дециметрах':'метрах'}: ${n} ${a}.`,n*k,`<p>1 ${a} = ${fmt(k)} ${b}. Переходим к меньшим единицам — умножаем: ${n} · ${fmt(k)} = <b>${fmt(n*k)}</b> ${b}.</p>`,b)},
+  ()=>{const pairs=[['мм','см',10],['см','дм',10],['см','м',100],['дм','м',10],['м','км',1000]];const [a,b,k]=pick(pairs);const n=ri(2,60)*k;
+    return T.input(`Вырази в ${b==='см'?'сантиметрах':b==='дм'?'дециметрах':b==='м'?'метрах':'километрах'}: ${fmt(n)} ${a}.`,n/k,`<p>1 ${b} = ${fmt(k)} ${a}. Переходим к большим единицам — делим: ${fmt(n)} : ${fmt(k)} = <b>${fmt(n/k)}</b> ${b}.</p>`,b)},
+  ()=>{const f=pick([['дм','см',10],['м','см',100],['м','дм',10],['см','мм',10],['км','м',1000]]);const big=ri(2,15),small=ri(1,f[2]-1);const ans=big*f[2]+small;
+    return T.input(`Вырази в ${f[1]==='см'?'сантиметрах':f[1]==='дм'?'дециметрах':f[1]==='мм'?'миллиметрах':'метрах'}: ${big} ${f[0]} ${small} ${f[1]}.`,ans,`<p>${big} ${f[0]} = ${big} · ${fmt(f[2])} = ${fmt(big*f[2])} ${f[1]}; прибавляем ${small} ${f[1]}: ${fmt(big*f[2])} + ${small} = <b>${fmt(ans)}</b> ${f[1]}.</p>`,f[1])},
+  ()=>{const L=letters(3);const ab=ri(2,9),bc=ri(2,9);const mode=ri(0,1);const xs=[60,60+ab*25,60+(ab+bc)*25];
+    const fig=svg(400,120,ln(xs[0],60,xs[2],60)+pt(xs[0],60,L[0])+pt(xs[1],60,L[1])+pt(xs[2],60,L[2])+txt((xs[0]+xs[1])/2,90,`${mode?ab:ab} см`)+txt((xs[1]+xs[2])/2,90,mode?`? см`:`${bc} см`)+(mode?txt((xs[0]+xs[2])/2,112,`${ab+bc} см`):''));
+    return mode?T.input(`Точка ${L[1]} лежит на отрезке ${L[0]}${L[2]}. ${L[0]}${L[1]} = ${ab} см, ${L[0]}${L[2]} = ${ab+bc} см. Найди длину ${L[1]}${L[2]}.`,bc,`<p>${L[1]}${L[2]} = ${L[0]}${L[2]} − ${L[0]}${L[1]} = ${ab+bc} − ${ab} = <b>${bc}</b> см.</p>`,'см').withFig(fig)
+      :T.input(`Точка ${L[1]} лежит на отрезке ${L[0]}${L[2]}. ${L[0]}${L[1]} = ${ab} см, ${L[1]}${L[2]} = ${bc} см. Найди длину ${L[0]}${L[2]}.`,ab+bc,`<p>${L[0]}${L[2]} = ${L[0]}${L[1]} + ${L[1]}${L[2]} = ${ab} + ${bc} = <b>${ab+bc}</b> см.</p>`,'см').withFig(fig)},
+  ()=>{const mm=ri(12,98);if(mm%10===0)return GEN.p5[4]();const cm=Math.floor(mm/10),r=mm%10;const x0=20,px=3.6;let s=`<rect x="10" y="60" width="380" height="50" rx="6" fill="var(--gold-soft)" stroke="var(--gold)"/>`;
+    for(let i=0;i<=100;i++){const x=x0+i*px;const h=i%10===0?18:i%5===0?12:7;s+=`<line x1="${x}" y1="60" x2="${x}" y2="${60+h}" stroke="var(--fg)" stroke-width="1"/>`;if(i%10===0)s+=`<text x="${x}" y="100" fill="var(--fg)" text-anchor="middle" font-size="13" font-style="normal">${i/10}</text>`}
+    s+=ln(x0,40,x0+mm*px,40,'var(--heart)',4)+dot(x0,40)+dot(x0+mm*px,40)+txt(x0,25,'A')+txt(x0+mm*px,25,'B');
+    return T.input(`Измерь отрезок AB по линейке. Запиши длину в <b>миллиметрах</b>.`,mm,`<p>Конец отрезка стоит между ${cm} и ${cm+1} см, на ${r}-м миллиметровом делении: ${cm} см ${r} мм = ${cm} · 10 + ${r} = <b>${mm}</b> мм.</p>`,'мм').withFig(svg(400,120,s))},
+  ()=>{const L=letters(4);const f=pick([['дм','см',10],['м','дм',10],['см','мм',10]]);const a=ri(2,9),b=ri(1,9);const v1=a*f[2]+b;const v2=v1+pick([-3,-1,1,2,5]);
+    const first=`${a} ${f[0]} ${b} ${f[1]}`,second=`${v2} ${f[1]}`;const ans=v1>v2?`${L[0]}${L[1]}`:`${L[2]}${L[3]}`;
+    return T.choice(`${L[0]}${L[1]} = ${first}, ${L[2]}${L[3]} = ${second}. Какой отрезок длиннее?`,ans,[v1>v2?`${L[2]}${L[3]}`:`${L[0]}${L[1]}`,'они равны'],`<p>Переведём в одни единицы: ${first} = ${v1} ${f[1]}. Сравниваем ${v1} и ${v2}: длиннее <b>${ans}</b>.</p>`)},
+  ()=>{const f=pick([['м','дм',10],['дм','см',10],['см','мм',10]]);const a1=ri(1,9),b1=ri(1,9),a2=ri(1,9),b2=ri(1,9);const sum=(a1*f[2]+b1)+(a2*f[2]+b2);
+    return T.input(`Вычисли: ${a1} ${f[0]} ${b1} ${f[1]} + ${a2} ${f[0]} ${b2} ${f[1]}. Ответ запиши в ${f[1]==='дм'?'дециметрах':f[1]==='см'?'сантиметрах':'миллиметрах'}.`,sum,`<p>Переводим в ${f[1]}: ${a1*f[2]+b1} + ${a2*f[2]+b2} = <b>${sum}</b> ${f[1]}.</p>`,f[1])},
+];
+
+/* §6 Координатный луч */
+function rayFig(opts){const {unit=1,start=0,n=13,pts=[],hits=false,px=27,x0=30,y=70}=opts;let s=ln(x0-15,y,x0+n*px+10,y,'var(--info)',3)+arrow(x0+n*px+12,y);
+  for(let i=0;i<=n;i++){const x=x0+i*px;s+=`<line x1="${x}" y1="${y-6}" x2="${x}" y2="${y+6}" stroke="var(--fg)" stroke-width="2"/>`}
+  s+=txt(x0,y-16,'O')+txt(x0,y+26,String(start));if(start===0)s+=txt(x0+px,y+26,String(unit));
+  for(const p of pts)s+=pt(x0+p.i*px,y,p.l,-14);
+  if(hits)for(let i=1;i<=n;i++)s+=`<g class="hit" data-v="${start+i*unit}"><circle class="area" cx="${x0+i*px}" cy="${y}" r="13" fill="transparent"/><circle class="mark" cx="${x0+i*px}" cy="${y}" r="0" fill="var(--accent)"/></g>`;
+  return svg(400,120,s)}
+GEN.p6=[
+  ()=>{const unit=pick([1,1,2,5,10]);const L=letters(3);const idx=shuffle([2,3,4,5,6,7,8,9,10,11,12]).slice(0,3).sort((a,b)=>a-b);const pts=idx.map((i,k)=>({i,l:L[k]}));const k=ri(0,2);
+    return T.input(`Единичный отрезок показан на чертеже. Какова координата точки ${L[k]}?`,idx[k]*unit,`<p>Единичный отрезок равен ${unit}. От начала отсчёта O до точки ${L[k]} отложено ${idx[k]} ${plural(idx[k],['отрезок','отрезка','отрезков'])}: ${idx[k]} · ${unit} = <b>${idx[k]*unit}</b>. Записывают ${L[k]}(${idx[k]*unit}).</p>`,'').withFig(rayFig({unit,pts}))},
+  ()=>{const unit=pick([1,2,5,10]);const target=ri(2,12)*unit;return pickTask(`<p>Отметь на координатном луче число <b>${target}</b> — нажми на нужное деление.</p>`,target,`<p>Единичный отрезок равен ${unit}, значит число ${target} — это ${target/unit}-е деление от начала отсчёта.</p>`,rayFig({unit,hits:true}))},
+  ()=>{const start=pick([10,100]);const step=start;const L=letters(3);const idx=shuffle([2,3,4,5,6,7,8,9,10,11]).slice(0,3).sort((a,b)=>a-b);const pts=idx.map((i,k)=>({i,l:L[k]}));const k=ri(0,2);
+    return T.input(`На части координатного луча подписано первое деление. Какова координата точки ${L[k]}?`,start+idx[k]*step,`<p>Каждое деление — ${step}. Точка ${L[k]} стоит на ${idx[k]+1}-м делении: ${idx[k]+1} · ${step} = <b>${start+idx[k]*step}</b>.</p>`,'').withFig(rayFig({unit:step,start:step,pts,n:12}))},
+  ()=>{const L=letters(3);const vals=shuffle([ri(2,9),ri(10,99),ri(100,999)]);const right=ri(0,1);const idx=vals.indexOf(right?Math.max(...vals):Math.min(...vals));
+    return T.choice(`Какая из точек ${L.map((l,i)=>`${l}(${vals[i]})`).join(', ')} расположена на координатном луче ${right?'правее':'левее'} других?`,L[idx],L.filter((_,i)=>i!==idx),`<p>Большему числу соответствует точка, расположенная правее. ${right?'Наибольшее':'Наименьшее'} число — ${vals[idx]}, это точка <b>${L[idx]}</b>.</p>`)},
+  ()=>{const a=ri(3,80)*10;const b=a+10;const near=ri(0,1)?a:b;const ans=near===a?ri(a+1,a+4):ri(b-4,b-1);const wrong=near===a?[ri(b-4,b-1),a-ri(1,3),b+ri(1,3)]:[ri(a+1,a+4),a-ri(1,3),b+ri(1,3)];
+    return T.choice(`Какое число находится на координатном луче между ${a} и ${b} и расположено ближе к числу ${near}?`,ans,wrong,`<p>Между ${a} и ${b} лежат числа от ${a+1} до ${b-1}. Ближе к ${near} из предложенных — <b>${ans}</b>.</p>`)},
+  ()=>{const k=ri(5,40),d=ri(1,4);const mode=ri(0,1);return T.input(`Точка K(${k}) отмечена на координатном луче. Назови координату точки, удалённой от K на ${d} ${plural(d,['единичный отрезок','единичных отрезка','единичных отрезков'])} ${mode?'вправо':'влево'}.`,mode?k+d:k-d,`<p>Вправо — координата увеличивается, влево — уменьшается: ${k} ${mode?'+':'−'} ${d} = <b>${mode?k+d:k-d}</b>.</p>`)},
+  ()=>{const L=letters(4);const vals=shuffle([ri(1,9),ri(10,20),ri(21,40),ri(41,60)]);const order=[...vals].sort((a,b)=>a-b);
+    return T.order(`Точки ${L.map((l,i)=>`${l}(${vals[i]})`).join(', ')} отмечены на координатном луче. Расставь их координаты слева направо (нажимай по порядку):`,order,`<p>Слева направо числа на луче возрастают: <b>${order.join(' → ')}</b>.</p>`)},
+];
+
+/* §20 Угол */
+function angleFig(deg,labels,opts={}){const {w=320,h=200,ox=60,oy=160,len=200,color='var(--info)'}=opts;const rad=deg*Math.PI/180;const x2=ox+len*Math.cos(rad),y2=oy-len*Math.sin(rad);
+  let s=ln(ox,oy,ox+len,oy,color)+ln(ox,oy,x2,y2,color);
+  if(deg===90)s+=`<path d="M${ox+18} ${oy} v-18 h-18" fill="none" stroke="var(--fg)" stroke-width="2"/>`;else s+=`<path d="M${ox+28} ${oy} A28 28 0 0 0 ${ox+28*Math.cos(rad)} ${oy-28*Math.sin(rad)}" fill="none" stroke="var(--heart)" stroke-width="2"/>`;
+  if(labels)s+=dot(ox,oy)+txt(ox-4,oy+22,labels[1])+txt(ox+len,oy+22,labels[2])+txt(x2+(x2<ox+40?-14:10),y2-8,labels[0]);
+  return svg(w,h,s)}
+function protractorFig(deg){const cx=200,cy=190,r=150;let s=`<path d="M${cx-r-20} ${cy} A${r+20} ${r+20} 0 0 1 ${cx+r+20} ${cy} Z" fill="var(--gold-soft)" stroke="var(--gold)" stroke-width="2"/>`;
+  for(let a=0;a<=180;a+=5){const rad=a*Math.PI/180;const big=a%10===0;const r1=r-(big?18:10);s+=`<line x1="${cx+r1*Math.cos(rad)}" y1="${cy-r1*Math.sin(rad)}" x2="${cx+r*Math.cos(rad)}" y2="${cy-r*Math.sin(rad)}" stroke="var(--fg)" stroke-width="${big?1.5:1}"/>`;
+    if(a%10===0){const rt=r-34;s+=`<text x="${cx+rt*Math.cos(rad)}" y="${cy-rt*Math.sin(rad)+4}" fill="var(--fg)" text-anchor="middle" font-size="11" font-style="normal">${a}</text>`}}
+  const rad=deg*Math.PI/180;s+=ln(cx,cy,cx+r+30,cy,'var(--heart)',3)+ln(cx,cy,cx+(r+30)*Math.cos(rad),cy-(r+30)*Math.sin(rad),'var(--heart)',3)+dot(cx,cy)+txt(cx,cy+22,'O');
+  return svg(400,215,s)}
+const angleKind=d=>d<90?'острый':d===90?'прямой':d<180?'тупой':'развёрнутый';
+GEN.p20=[
+  ()=>{const deg=pick([ri(15,80),90,ri(100,165),180]);const L=letters(3);const fig=deg===180?svg(320,120,ln(20,60,300,60)+dot(160,60)+txt(160,48,L[1])+txt(24,48,L[0])+txt(296,48,L[2])):angleFig(deg,L);
+    return T.choice(`Определи вид угла ${L[0]}${L[1]}${L[2]}.`,angleKind(deg),['острый','прямой','тупой','развёрнутый'].filter(x=>x!==angleKind(deg)),`<p>Прямой угол равен 90°, острый — меньше 90°, тупой — больше 90°, но меньше 180°, развёрнутый — 180° (стороны образуют прямую).</p><p>Этот угол — <b>${angleKind(deg)}</b>.</p>`).withFig(fig)},
+  ()=>{const deg=ri(2,35)*5;return T.input(`Измерь угол по транспортиру. Сколько градусов он содержит?`,deg,`<p>Вершина угла совмещена с центром транспортира, одна сторона идёт по нулю (справа). Вторая сторона показывает <b>${deg}°</b>. Это ${angleKind(deg)} угол.</p>`,'°').withFig(protractorFig(deg))},
+  ()=>{const d=ri(1,8)*10;const mode=ri(0,1);const total=mode?90:180;const small=(total-d)/2;return T.input(`${mode?'Прямой':'Развёрнутый'} угол разделён лучом на два угла так, что первый на ${d}° больше второго. Сколько градусов содержит <b>меньший</b> угол?`,small,`<p>Сумма углов ${total}°. Если меньший угол — x, то больший x + ${d}: x + x + ${d} = ${total}; 2x = ${total-d}; x = <b>${small}</b>°. Больший угол: ${small+d}°.</p>`,'°')},
+  ()=>{const k=pick([2,3,4,5]);const mode=ri(0,1);const total=mode?90:180;if(total%(k+1)!==0)return GEN.p20[3]();const small=total/(k+1);return T.input(`${mode?'Прямой':'Развёрнутый'} угол разделён лучом на два угла так, что один в ${k} ${raz(k)} больше другого. Найди <b>меньший</b> угол.`,small,`<p>Меньший угол — x, больший — ${k}x. x + ${k}x = ${total}; ${k+1}x = ${total}; x = <b>${small}</b>°.</p>`,'°')},
+  ()=>{const deg=ri(2,17)*10;const L=letters(4);const half=deg/2;return T.input(`Луч ${L[1]}${L[2]} — биссектриса угла ${L[0]}${L[1]}${L[3]}, равного ${deg}°. Найди угол ${L[0]}${L[1]}${L[2]}.`,half,`<p>Биссектриса делит угол на два равных угла: ${deg}° : 2 = <b>${half}</b>°.</p>`,'°')},
+  ()=>{const h=pick([1,2,3,4,5,6]);const deg=h*30;const mode=ri(0,1);return mode?T.input(`Какой угол образуют часовая и минутная стрелки в ${h} ч? Ответ в градусах.`,deg,`<p>Циферблат — полный оборот 360°, между соседними цифрами 360° : 12 = 30°. В ${h} ч между стрелками ${h} ${plural(h,['промежуток','промежутка','промежутков'])}: ${h} · 30 = <b>${deg}</b>°.</p>`,'°')
+    :T.choice(`Какой вид угла образуют часовая и минутная стрелки в ${h} ч?`,angleKind(deg),['острый','прямой','тупой','развёрнутый'].filter(x=>x!==angleKind(deg)),`<p>Между соседними цифрами 30°, в ${h} ч угол равен ${deg}° — это <b>${angleKind(deg)}</b> угол.</p>`)},
+  ()=>{const L=letters(3);const deg=ri(20,160);const fig=angleFig(deg,L);const q=ri(0,1);return q?T.choice(`Как называется вершина угла на чертеже?`,`точка ${L[1]}`,[`точка ${L[0]}`,`точка ${L[2]}`,`луч ${L[1]}${L[0]}`],`<p>Вершина угла — точка, из которой выходят обе стороны: <b>${L[1]}</b>. Стороны — лучи ${L[1]}${L[0]} и ${L[1]}${L[2]}.</p>`).withFig(fig)
+    :T.choice(`Как правильно обозначить угол на чертеже?`,`∠${L[0]}${L[1]}${L[2]}`,[`∠${L[1]}${L[0]}${L[2]}`,`∠${L[0]}${L[2]}${L[1]}`,`∠${L[2]}${L[0]}${L[1]}`],`<p>При обозначении угла тремя буквами вершина пишется <b>в середине</b>: ∠${L[0]}${L[1]}${L[2]} (или ∠${L[2]}${L[1]}${L[0]}).</p>`).withFig(fig)},
+];
+
 /* ---------- topics ---------- */
 const yt=id=>`https://www.youtube.com/watch?v=${id}`;
 const TOPICS=[
   {ch:'Глава 1. Натуральные числа'},
-  {id:'p1',n:1,title:'Как решать задачу',soon:true},
+  {id:'p1',n:1,title:'Как решать задачу',skills:['на сколько / во сколько раз','задачи в два действия','анализ условия'],videos:[['Решение задач: общая схема','Mr9xXH1Nq-I'],['Решение текстовых задач. Часть 1','DdrOeubLRwA']]},
   {id:'p2',n:2,title:'Чтение и запись натуральных чисел',skills:['разряды и классы','число словами','сумма цифр'],videos:[['Чтение и запись натуральных чисел. 5 класс','O-tPBLuFM6s'],['Классы и разряды натурального числа','8owx_PZLwuA']]},
   {id:'p3',n:3,title:'Сравнение натуральных чисел',skills:['знаки < > =','возрастание и убывание','наибольшее число из цифр'],videos:[['Сравнение натуральных чисел. Видеоурок 4','x1g3qrJFE40'],['Сравнение натуральных чисел','wPkhOFMFV0w']]},
-  {id:'p4',n:4,title:'Точка, прямая, луч, отрезок',soon:true},
-  {id:'p5',n:5,title:'Измерение отрезков',soon:true},
-  {id:'p6',n:6,title:'Координатный луч',soon:true},
+  {id:'p4',n:4,title:'Точка, прямая, луч, отрезок',skills:['принадлежит / не принадлежит','сколько отрезков и лучей','пересечение'],videos:[['Прямая, луч, отрезок. 5 класс','1e9M2rSl_SI'],['Что такое точка, прямая, отрезок, луч','apwthNS4XHo']]},
+  {id:'p5',n:5,title:'Измерение отрезков',skills:['мм, см, дм, м, км','измерь по линейке','длина части отрезка'],videos:[['Отрезок. Длина отрезка','rN-VVE-3fy4'],['Единицы длины: как перевести','1eGc5cr4vFk']]},
+  {id:'p6',n:6,title:'Координатный луч',skills:['координата точки','отметь число','правее — больше'],videos:[['Шкала и координатный луч','y3GLgVmTTFE'],['Натуральные числа на координатном луче','LzXJlPDwRhQ']]},
   {id:'p7',n:7,title:'Округление натуральных чисел',skills:['до десятков, сотен, тысяч','проверка округления'],videos:[['Округление чисел. Прикидки. Видеоурок 25','CB8tdQtLc3Q'],['Математика 5 класс. Округление чисел','XJhhk4TQmL4']]},
   {id:'p8',n:8,title:'Сложение и вычитание',skills:['столбиком','удобный способ','на сколько больше'],videos:[['Сложение и вычитание натуральных чисел','G-2NZqMYzvo'],['Сложение и его свойства','hahKteylZwM'],['Вычитание и его свойства','gwvzutHrY4g']]},
   {id:'p9',n:9,title:'Умножение и деление',skills:['столбиком и уголком','удобный способ','во сколько раз'],videos:[['Умножение натуральных чисел и его свойства','uENR9j4h5AE'],['Деление натуральных чисел. Практика. Урок 13','td_AvM1zjpc']]},
@@ -560,7 +717,7 @@ const TOPICS=[
   {id:'p17',n:17,title:'Уравнение',skills:['x + a = b','a · x = b','в два действия','проверка корня'],videos:[['Уравнение. Корень уравнения. 5 класс','F09vD49Tx4k'],['Как решать уравнения. Подробно','RZBYAzlpBIQ']]},
   {id:'p18',n:18,title:'Формулы',skills:['s = v·t','периметр и площадь','цена · количество'],videos:[['Задачи на движение: скорость, время, расстояние','jLwRXMVdfBc'],['Формула площади прямоугольника','s8a5YD49R2M']]},
   {id:'p19',n:19,title:'Задачи с помощью уравнений',skills:['задуманное число','на больше / в раз больше'],videos:[['Решение задач с помощью уравнений','ISHU_bHbcPg']]},
-  {id:'p20',n:20,title:'Угол. Измерение углов',soon:true},
+  {id:'p20',n:20,title:'Угол. Измерение углов',skills:['виды углов','транспортир','биссектриса','часы'],videos:[['Измерение углов. Транспортир','tG71gABfdKQ'],['Что такое угол? Виды углов','LTEW7Pw93Gg']]},
 ];
 const ACTIVE=TOPICS.filter(t=>t.id&&!t.soon);
 const byId=id=>TOPICS.find(t=>t.id===id);
@@ -709,7 +866,8 @@ function renderTask(){const s=session,t=s.cur;const topic=byId(t.topic);
   if(t.kind==='input')body=`<div class="answer"><input id="ans" type="text" inputmode="${touch?'none':'numeric'}" ${touch?'readonly':''} autocomplete="off" placeholder="?" aria-label="Ответ">${t.unit?`<span class="unit">${t.unit}</span>`:''}</div>
     <div class="keypad ${touch?'show':''}" id="keypad">${[1,2,3,4,5,6,7,8,9].map(k=>`<button class="key" data-k="${k}">${k}</button>`).join('')}<button class="key del" data-k="del" aria-label="Стереть">⌫</button><button class="key" data-k="0">0</button><button class="key del" data-k="clr" aria-label="Очистить">C</button></div>`;
   else if(t.kind==='choice')body=`<div class="opts">${t.options.map(o=>`<button class="opt ${t.wide?'wide':''}" data-v="${esc(o)}">${esc(o).replace(/\^(\d+)/,'<sup>$1</sup>')}</button>`).join('')}</div>`;
-  else body=`<div class="seq" id="seq"><span class="ph">Нажимай на числа по порядку</span></div><div class="chips" id="chips">${t.items.map((v,i)=>`<button class="chip" data-i="${i}">${fmt(Number(v))}</button>`).join('')}</div>`;
+  else if(t.kind==='pick')body=`<div class="hint">Нажми на чертеже, затем «Проверить».</div>`;
+  else body=`<div class="seq" id="seq"><span class="ph">Нажимай на числа по порядку</span></div><div class="chips" id="chips">${t.items.map((v,i)=>`<button class="chip" data-i="${i}">${isNaN(Number(v))?v:fmt(Number(v))}</button>`).join('')}</div>`;
   app.innerHTML=`<div class="lesson-head"><button class="close" id="quit" aria-label="Выйти">×</button><div class="progress"><i style="width:${pct}%"></i></div><div class="hearts">${[1,2,3].map(i=>`<svg class="${s.hearts>=i?'':'off'}"><use href="#i-heart"/></svg>`).join('')}</div></div>
   <div class="card lesson-card"><div class="kicker">${s.review?'Повторение · ':''}§ ${topic.n} · ${topic.title}</div><div class="q">${t.q}</div>${body}
   <div class="actions"><button class="btn primary" id="check" disabled>Проверить</button></div>
@@ -722,13 +880,14 @@ function renderTask(){const s=session,t=s.cur;const topic=byId(t.topic);
     if(!touch)setTimeout(()=>inp.focus(),50);
     else{s.keyHandler=e=>{if(s.answered){if(e.key==='Enter')nextTask();return}if(/^\d$/.test(e.key)&&inp.value.length<9){inp.value+=e.key;sync()}else if(e.key==='Backspace'){inp.value=inp.value.slice(0,-1);sync()}else if(e.key==='Enter'&&!check.disabled)doCheck()};document.addEventListener('keydown',s.keyHandler)}}
   else if(t.kind==='choice'){app.querySelectorAll('.opt').forEach(b=>b.addEventListener('click',()=>{if(s.answered)return;app.querySelectorAll('.opt').forEach(x=>x.classList.remove('sel'));b.classList.add('sel');s.sel=b.dataset.v;check.disabled=false}))}
-  else{const seqEl=document.getElementById('seq');const chips=app.querySelectorAll('.chip');const draw=()=>{seqEl.innerHTML=s.seq.length?s.seq.map(i=>`<button class="chip" data-i="${i}">${fmt(Number(t.items[i]))}</button>`).join(''):'<span class="ph">Нажимай на числа по порядку</span>';
+  else if(t.kind==='pick'){app.querySelectorAll('.hit').forEach(h=>h.addEventListener('click',()=>{if(s.answered)return;app.querySelectorAll('.hit').forEach(x=>x.classList.remove('sel'));h.classList.add('sel');s.sel=h.dataset.v;check.disabled=false}))}
+  else{const seqEl=document.getElementById('seq');const chips=app.querySelectorAll('.chip');const draw=()=>{seqEl.innerHTML=s.seq.length?s.seq.map(i=>`<button class="chip" data-i="${i}">${isNaN(Number(t.items[i]))?t.items[i]:fmt(Number(t.items[i]))}</button>`).join(''):'<span class="ph">Нажимай на числа по порядку</span>';
       seqEl.querySelectorAll('.chip').forEach(c=>c.addEventListener('click',()=>{if(s.answered)return;s.seq=s.seq.filter(x=>x!==Number(c.dataset.i));chips[c.dataset.i].classList.remove('used');draw()}));check.disabled=s.seq.length!==t.items.length};
     chips.forEach(c=>c.addEventListener('click',()=>{if(s.answered||c.classList.contains('used'))return;c.classList.add('used');s.seq.push(Number(c.dataset.i));draw()}))}
   check.addEventListener('click',()=>{if(s.answered)nextTask();else doCheck()});
   window.scrollTo(0,0)}
 function doCheck(){const s=session,t=s.cur;let given;
-  if(t.kind==='input')given=norm(document.getElementById('ans').value);else if(t.kind==='choice')given=s.sel;else given=s.seq.map(i=>t.items[i]).join('|');
+  if(t.kind==='input')given=norm(document.getElementById('ans').value);else if(t.kind==='choice'||t.kind==='pick')given=s.sel;else given=s.seq.map(i=>t.items[i]).join('|');
   const ok=t.kind==='input'?norm(given)===norm(t.answer):String(given)===String(t.answer);
   s.answered=true;const fb=document.getElementById('fb');const check=document.getElementById('check');const st=tstat(t.topic);st.asked++;
   const card=app.querySelector('.card');card.classList.remove('wrong','right');void card.offsetWidth;
@@ -738,12 +897,13 @@ function doCheck(){const s=session,t=s.cur;let given;
     app.querySelector('.progress i').style.width=Math.round(s.done/s.total*100)+'%'}
   else{s.hearts--;s.wrong++;if(!S.mistakes.some(mk=>mk.t===t.topic&&mk.g===t.gi))S.mistakes.push({t:t.topic,g:t.gi});
     const again=makeTask(t.topic,t.gi);again.retry=true;s.queue.push(again);
-    fb.className='feedback show bad';const shown=t.kind==='order'?t.answer.split('|').map(x=>fmt(Number(x))).join(', '):t.answer.replace(/\^(\d+)/,'<sup>$1</sup>');
+    fb.className='feedback show bad';const shown=t.kind==='order'?t.answer.split('|').map(x=>isNaN(Number(x))?x:fmt(Number(x))).join(', '):t.kind==='pick'?(isNaN(Number(t.answer))?`точка ${t.answer}`:t.answer):t.answer.replace(/\^(\d+)/,'<sup>$1</sup>');
     const topic=byId(t.topic);
     fb.innerHTML=`<h3>Правильный ответ: ${shown}${t.unit?' '+t.unit:''}</h3><div class="exp">${t.explain}</div>${topic.videos?`<div class="video">Не понятно? <a href="${yt(topic.videos[0][1])}" target="_blank" rel="noopener"><svg class="ico"><use href="#i-play"/></svg>Посмотреть объяснение</a></div>`:''}`;
     card.classList.add('wrong');
     document.querySelectorAll('.hearts svg').forEach((h,i)=>{if(i===s.hearts){h.classList.add('lost');setTimeout(()=>h.classList.add('off'),350)}else h.classList.toggle('off',s.hearts<i+1);if(s.hearts===1&&i===0)h.classList.add('low')})}
   if(t.kind==='choice')app.querySelectorAll('.opt').forEach(b=>{if(b.dataset.v===String(t.answer))b.classList.add('ok');else if(b.dataset.v===given&&!ok)b.classList.add('bad')});
+  if(t.kind==='pick')app.querySelectorAll('.hit').forEach(h=>{h.classList.remove('sel');if(h.dataset.v===String(t.answer))h.classList.add('ok');else if(h.dataset.v===given&&!ok)h.classList.add('bad')});
   if(t.kind==='input')document.getElementById('ans').disabled=true;
   check.textContent=s.hearts<=0?'Итоги':'Дальше';check.disabled=false;check.focus();save()}
 function finish(passed,quit){const s=session;view='result';if(s.keyHandler){document.removeEventListener('keydown',s.keyHandler);s.keyHandler=null}const sec=Math.round((Date.now()-s.start)/1000);
