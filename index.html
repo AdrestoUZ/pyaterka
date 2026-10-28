@@ -4,8 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}</style>
-<script>/* Необязательно: адрес сервера синхронизации (см. README). Пусто — только локальный прогресс + код переноса. */
-window.PYATERKA_SYNC_URL='';</script>
+<script>
+/* Личный кабинет (Supabase). Пусто — приложение работает без аккаунтов, прогресс на устройстве + код переноса. */
+window.PYATERKA_SUPABASE={url:'',anon:''};
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
 <title>Пятёрка</title>
@@ -178,6 +181,26 @@ td.r,th.r{text-align:right}
 .muted{color:var(--muted)}
 .confirm{display:none;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px}
 .confirm.show{display:flex}
+/* auth & profiles */
+.auth{max-width:420px;margin:24px auto}
+.auth h2{font-size:24px;font-weight:900;margin-bottom:6px}
+.auth p{color:var(--muted);margin:0 0 16px}
+.field{display:grid;gap:6px;margin-bottom:12px}
+.field label{font-size:13px;font-weight:800;color:var(--muted)}
+.field input{padding:12px 14px;border-radius:12px;border:2px solid var(--line);background:var(--surface-2);color:var(--fg);font-size:17px;min-height:48px}
+.field input:focus{border-color:var(--accent);outline:none}
+.err{color:var(--heart);font-weight:700;font-size:14px;min-height:20px;margin:4px 0 8px}
+.plist{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;margin:16px 0}
+.pcard{border:2px solid var(--line);background:var(--surface);border-radius:var(--radius);padding:18px 12px;display:grid;justify-items:center;gap:10px;color:var(--fg);font-weight:800;min-height:140px;box-shadow:var(--shadow)}
+.pcard.add{border-style:dashed;color:var(--muted);background:transparent}
+.pcard.on{border-color:var(--accent);background:var(--accent-soft)}
+.avatar{width:56px;height:56px;border-radius:50%;display:grid;place-items:center;font-weight:900;font-size:24px;color:#fff}
+.avatar.sm{width:30px;height:30px;font-size:14px}
+.swatches{display:flex;gap:8px;flex-wrap:wrap}
+.swatch{width:34px;height:34px;border-radius:50%;border:3px solid transparent;cursor:pointer}
+.swatch.on{border-color:var(--fg)}
+.whoami{display:inline-flex;align-items:center;gap:8px;background:var(--surface-2);border:0;border-radius:999px;padding:4px 12px 4px 4px;font-weight:800;color:var(--fg);font-size:14px}
+.hist td:first-child{white-space:nowrap;color:var(--muted)}
 /* keypad */
 .keypad{display:none;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px;max-width:360px}
 .keypad.show{display:grid}
@@ -267,6 +290,7 @@ td.r,th.r{text-align:right}
   <header class="topbar">
     <div class="brand"><span class="five">5</span><span>Пятёрка</span></div>
     <div class="stats">
+      <span id="whoami"></span>
       <span class="pill fire" title="Дней подряд"><svg><use href="#i-fire"/></svg><span id="st-streak">0</span></span>
       <span class="pill gold" title="Опыт"><svg><use href="#i-star"/></svg><span id="st-xp">0</span> XP</span>
     </div>
@@ -542,26 +566,81 @@ const ACTIVE=TOPICS.filter(t=>t.id&&!t.soon);
 const byId=id=>TOPICS.find(t=>t.id===id);
 
 /* ---------- state ---------- */
-const KEY='pyaterka_v1';
+let KEY='pyaterka_v1';
 const DAILY_GOAL=30;
 let S=load();
 function load(){let s=null;try{s=JSON.parse(localStorage.getItem(KEY))}catch(e){}
   return Object.assign({name:'',xp:0,streak:0,lastDay:null,unlockAll:false,topics:{},mistakes:[],days:{},log:[]},s||{})}
 function save(){S.updatedAt=Date.now();try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}cloudPush()}
-/* ---------- sync (optional family code via SYNC_URL) ---------- */
-const SYNC_URL=(window.PYATERKA_SYNC_URL||'').replace(/\/$/,'');
-let cloud={ready:false,timer:null,writing:false,dirty:false,status:'local',code:null,poll:null};
-function setSync(st){cloud.status=st;document.querySelectorAll('.sync').forEach(el=>{el.classList.toggle('on',st==='on');el.querySelector('span').textContent=st==='on'?`Семейный код ${cloud.code}: прогресс общий для всех устройств`:st==='err'?'Сервер синхронизации недоступен, работаем локально':'Прогресс хранится на этом устройстве'})}
-function adopt(remote){S=Object.assign({name:'',xp:0,streak:0,lastDay:null,unlockAll:false,topics:{},mistakes:[],days:{},log:[]},remote);try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}hdr();if(view==='home')renderHome();else if(view==='parent')renderParent()}
-async function cloudInit(){if(!SYNC_URL)return;try{cloud.code=localStorage.getItem(KEY+'_code')}catch(e){}if(!cloud.code)return;
-  try{const r=await fetch(`${SYNC_URL}/${encodeURIComponent(cloud.code)}`,{cache:'no-store'});if(r.status===404){cloud.ready=true;setSync('on');cloudPush();return}if(!r.ok)throw 0;const remote=await r.json();
-    if((remote.updatedAt||0)>(S.updatedAt||0))adopt(remote);else if((S.updatedAt||0)>(remote.updatedAt||0))cloud.dirty=true;
-    cloud.ready=true;setSync('on');if(cloud.dirty)cloudPush();
-    clearInterval(cloud.poll);cloud.poll=setInterval(async()=>{if(session||document.hidden)return;try{const r=await fetch(`${SYNC_URL}/${encodeURIComponent(cloud.code)}`,{cache:'no-store'});if(!r.ok)return;const x=await r.json();if((x.updatedAt||0)>(S.updatedAt||0))adopt(x)}catch(e){}},30000)
-  }catch(e){setSync('err')}}
-function cloudPush(){if(!cloud.ready)return;cloud.dirty=true;clearTimeout(cloud.timer);cloud.timer=setTimeout(async()=>{if(cloud.writing){cloudPush();return}cloud.writing=true;cloud.dirty=false;try{await fetch(`${SYNC_URL}/${encodeURIComponent(cloud.code)}`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify(S)})}catch(e){setSync('err')}cloud.writing=false;if(cloud.dirty)cloudPush()},1500)}
-function setFamilyCode(code){code=code.trim().toLowerCase().replace(/[^a-z0-9-]/g,'');if(!code)return false;cloud.code=code;try{localStorage.setItem(KEY+'_code',code)}catch(e){}cloud.ready=false;cloudInit();return true}
-function newFamilyCode(){const w=['kot','lis','sova','zebra','ezh','panda','lev','volk','kit','bober'];return pick(w)+'-'+ri(100,999)+'-'+pick(w)}
+/* ---------- account (Supabase) ---------- */
+const SB_CFG=window.PYATERKA_SUPABASE||{};const HAS_SB=!!(SB_CFG.url&&SB_CFG.anon&&window.supabase);
+const sb=HAS_SB?window.supabase.createClient(SB_CFG.url,SB_CFG.anon):null;
+let cloud={status:'local',timer:null,writing:false,dirty:false,poll:null,user:null,profiles:[],profile:null};
+const COLORS=['#2f9e5b','#3a7bd5','#e2554d','#e0a21a','#9b59b6','#1abc9c','#e67e22','#34495e'];
+function setSync(st){cloud.status=st;document.querySelectorAll('.sync').forEach(el=>{el.classList.toggle('on',st==='on');el.querySelector('span').textContent=st==='on'?`Аккаунт ${cloud.user?.email||''}: прогресс общий для всех устройств`:st==='off'?'Нет связи с сервером — изменения сохранятся при следующем подключении':'Прогресс хранится на этом устройстве'})}
+function defaults(){return {name:'',xp:0,streak:0,lastDay:null,unlockAll:false,topics:{},mistakes:[],days:{},log:[]}}
+function adopt(remote){S=Object.assign(defaults(),remote);try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}hdr();if(view==='home')renderHome();else if(view==='parent')renderParent()}
+function renderWho(){const el=document.getElementById('whoami');if(!el)return;if(!cloud.profile){el.innerHTML='';return}
+  el.innerHTML=`<button class="whoami" id="switchp" title="Сменить профиль"><span class="avatar sm" style="background:${cloud.profile.color}">${esc(cloud.profile.name[0].toUpperCase())}</span>${esc(cloud.profile.name)}</button>`;
+  document.getElementById('switchp').addEventListener('click',()=>{if(session)return;renderProfiles()})}
+async function cloudInit(){if(!HAS_SB)return false;
+  const {data:{session:ses}}=await sb.auth.getSession();if(!ses){renderAuth();return true}
+  cloud.user=ses.user;await loadProfiles();
+  let pid=null;try{pid=localStorage.getItem('pyaterka_profile')}catch(e){}
+  const p=cloud.profiles.find(x=>x.id===pid);if(p)await openProfile(p);else renderProfiles();return true}
+async function loadProfiles(){const {data,error}=await sb.from('profiles').select('*').order('created_at');cloud.profiles=error?[]:data}
+async function openProfile(p){cloud.profile=p;try{localStorage.setItem('pyaterka_profile',p.id)}catch(e){}
+  KEY='pyaterka_v1_'+p.id;S=load();S.name=p.name;hdr();renderWho();renderHome();
+  await pullProgress(true);clearInterval(cloud.poll);cloud.poll=setInterval(()=>{if(!session&&!document.hidden)pullProgress(false)},30000)}
+async function pullProgress(first){if(!cloud.profile)return;try{const {data,error}=await sb.from('progress').select('state,updated_at').eq('profile_id',cloud.profile.id).maybeSingle();if(error)throw error;
+    if(data&&(data.updated_at||0)>(S.updatedAt||0)){adopt(Object.assign({},data.state,{updatedAt:data.updated_at}))}else if(first&&(S.updatedAt||0)>(data?.updated_at||0)){cloudPush()}
+    setSync('on')}catch(e){setSync('off')}}
+function cloudPush(){if(!cloud.profile)return;cloud.dirty=true;clearTimeout(cloud.timer);cloud.timer=setTimeout(async()=>{if(cloud.writing){cloudPush();return}cloud.writing=true;cloud.dirty=false;
+  try{const {error}=await sb.from('progress').upsert({profile_id:cloud.profile.id,state:S,updated_at:S.updatedAt||Date.now(),saved_at:new Date().toISOString()});if(error)throw error;setSync('on')}catch(e){setSync('off');cloud.dirty=true}
+  cloud.writing=false;if(cloud.dirty&&cloud.status==='on')cloudPush()},1500)}
+window.addEventListener('online',()=>{if(cloud.dirty)cloudPush()});
+async function logLesson(row){if(!cloud.profile)return;try{await sb.from('lessons').insert(Object.assign({profile_id:cloud.profile.id},row))}catch(e){}}
+
+function renderAuth(mode){view='auth';setNav('home');document.getElementById('whoami').innerHTML='';
+  const reg=mode==='reg';
+  app.innerHTML=`<div class="card auth"><div class="kicker">Личный кабинет</div><h2>${reg?'Создать аккаунт родителя':'Вход для родителя'}</h2>
+    <p>${reg?'Один аккаунт на семью: в нём профили детей, их прогресс и история уроков на всех устройствах.':'Войди один раз на каждом устройстве ребёнка — дальше приложение откроется сразу на его профиле.'}</p>
+    <form id="authf"><div class="field"><label for="email">E-mail</label><input id="email" type="email" autocomplete="email" required></div>
+    <div class="field"><label for="pass">Пароль</label><input id="pass" type="password" autocomplete="${reg?'new-password':'current-password'}" minlength="6" required></div>
+    <div class="err" id="autherr"></div>
+    <div class="actions"><button class="btn primary" type="submit" id="authbtn">${reg?'Зарегистрироваться':'Войти'}</button><button class="btn ghost" type="button" id="authsw">${reg?'У меня есть аккаунт':'Создать аккаунт'}</button></div></form>
+    <p class="muted" style="margin-top:18px;font-size:13px">Без аккаунта тоже можно: <button class="link" id="skipauth">продолжить на этом устройстве</button>.</p></div>`;
+  document.getElementById('authsw').addEventListener('click',()=>renderAuth(reg?'in':'reg'));
+  document.getElementById('skipauth').addEventListener('click',()=>{cloud.profile=null;KEY='pyaterka_v1';S=load();hdr();renderHome()});
+  document.getElementById('authf').addEventListener('submit',async e=>{e.preventDefault();const btn=document.getElementById('authbtn');btn.disabled=true;const err=document.getElementById('autherr');err.textContent='';
+    const email=document.getElementById('email').value.trim(),password=document.getElementById('pass').value;
+    try{const r=reg?await sb.auth.signUp({email,password}):await sb.auth.signInWithPassword({email,password});if(r.error)throw r.error;
+      if(reg&&!r.data.session){err.textContent='Проверь почту: нужно подтвердить e-mail, затем войди.';btn.disabled=false;return}
+      cloud.user=r.data.session.user;await loadProfiles();renderProfiles()}
+    catch(ex){err.textContent=ex.message==='Invalid login credentials'?'Неверный e-mail или пароль':ex.message==='User already registered'?'Такой аккаунт уже есть — войди':'Ошибка: '+ex.message;btn.disabled=false}});
+  window.scrollTo(0,0)}
+
+function renderProfiles(){view='profiles';setNav('home');document.getElementById('whoami').innerHTML='';
+  const list=cloud.profiles.map(p=>`<button class="pcard ${cloud.profile&&cloud.profile.id===p.id?'on':''}" data-id="${p.id}"><span class="avatar" style="background:${p.color}">${esc(p.name[0].toUpperCase())}</span><span>${esc(p.name)}</span></button>`).join('');
+  app.innerHTML=`<div class="card auth" style="max-width:560px"><div class="kicker">${esc(cloud.user?.email||'')}</div><h2>Кто занимается?</h2><p>${cloud.profiles.length?'Выбери профиль. Это устройство запомнит выбор.':'Добавь первый профиль ребёнка.'}</p>
+    <div class="plist">${list}<button class="pcard add" id="addp"><span class="avatar" style="background:var(--surface-2);color:var(--muted)">+</span><span>Добавить</span></button></div>
+    <div id="addform" hidden><div class="field"><label for="pname2">Имя</label><input id="pname2" type="text" maxlength="40" placeholder="Например, Маша"></div>
+      <div class="field"><label>Цвет</label><div class="swatches" id="sw">${COLORS.map((c,i)=>`<span class="swatch ${i===0?'on':''}" data-c="${c}" style="background:${c}"></span>`).join('')}</div></div>
+      <div class="err" id="perr"></div><div class="actions"><button class="btn primary" id="savep">Создать профиль</button><button class="btn ghost" id="cancelp">Отмена</button></div></div>
+    <p class="muted" style="margin-top:18px;font-size:13px"><button class="link" id="signout">Выйти из аккаунта</button></p></div>`;
+  app.querySelectorAll('.pcard[data-id]').forEach(b=>b.addEventListener('click',()=>openProfile(cloud.profiles.find(p=>p.id===b.dataset.id))));
+  const form=document.getElementById('addform');document.getElementById('addp').addEventListener('click',()=>{form.hidden=false;document.getElementById('pname2').focus()});
+  document.getElementById('cancelp').addEventListener('click',()=>{form.hidden=true});
+  let color=COLORS[0];app.querySelectorAll('.swatch').forEach(w=>w.addEventListener('click',()=>{app.querySelectorAll('.swatch').forEach(x=>x.classList.remove('on'));w.classList.add('on');color=w.dataset.c}));
+  document.getElementById('savep').addEventListener('click',async()=>{const name=document.getElementById('pname2').value.trim();const err=document.getElementById('perr');if(!name){err.textContent='Введи имя';return}
+    const {data,error}=await sb.from('profiles').insert({name,color}).select().single();if(error){err.textContent='Не удалось сохранить: '+error.message;return}
+    cloud.profiles.push(data);
+    // перенести локальный прогресс без аккаунта в первый профиль, если он есть
+    let legacy=null;try{legacy=JSON.parse(localStorage.getItem('pyaterka_v1'))}catch(e){}
+    if(legacy&&legacy.xp>0&&cloud.profiles.length===1){try{localStorage.setItem('pyaterka_v1_'+data.id,JSON.stringify(legacy))}catch(e){}}
+    openProfile(data)});
+  document.getElementById('signout').addEventListener('click',async()=>{await sb.auth.signOut();cloud.user=null;cloud.profile=null;cloud.profiles=[];clearInterval(cloud.poll);try{localStorage.removeItem('pyaterka_profile')}catch(e){}renderAuth()});
+  window.scrollTo(0,0)}
 function exportCode(){return btoa(unescape(encodeURIComponent(JSON.stringify(S))))}
 function importCode(code){try{const o=JSON.parse(decodeURIComponent(escape(atob(code.trim()))));if(!o||typeof o!=='object'||!('topics' in o))return false;o.updatedAt=Date.now();adopt(o);save();return true}catch(e){return false}}
 const tstat=id=>S.topics[id]||(S.topics[id]={crowns:0,lessons:0,asked:0,correct:0,sec:0});
@@ -574,9 +653,9 @@ function todayXP(){return (S.days[todayKey()]||{xp:0}).xp}
 const app=document.getElementById('app');
 const isTouch=()=>matchMedia('(pointer:coarse)').matches||innerWidth<=760;
 function setNav(id){document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b.id==='nav-'+id));const rv=document.getElementById('nav-review');if(rv)rv.classList.toggle('dot',S.mistakes.length>0)}
-document.getElementById('nav-home').addEventListener('click',()=>{if(session){if(session.keyHandler)document.removeEventListener('keydown',session.keyHandler);if(session.done===0){session=null;renderHome()}else finish(false,true);return}renderHome()});
-document.getElementById('nav-review').addEventListener('click',()=>{if(session)return;if(S.mistakes.length)startLesson('review');else{renderHome();const h=app.querySelector('.hero p');if(h)h.textContent='Ошибок для повторения пока нет — пройди любую тему.'}});
-document.getElementById('nav-parent').addEventListener('click',()=>{if(session)return;renderParent()});
+document.getElementById('nav-home').addEventListener('click',()=>{if(HAS_SB&&cloud.user&&!cloud.profile){renderProfiles();return}if(HAS_SB&&!cloud.user&&view==='auth')return;if(session){if(session.keyHandler)document.removeEventListener('keydown',session.keyHandler);if(session.done===0){session=null;renderHome()}else finish(false,true);return}renderHome()});
+document.getElementById('nav-review').addEventListener('click',()=>{if(session||view==='auth'||view==='profiles')return;if(S.mistakes.length)startLesson('review');else{renderHome();const h=app.querySelector('.hero p');if(h)h.textContent='Ошибок для повторения пока нет — пройди любую тему.'}});
+document.getElementById('nav-parent').addEventListener('click',()=>{if(session||view==='auth'||view==='profiles')return;renderParent()});
 function hdr(){document.getElementById('st-streak').textContent=streakShown();document.getElementById('st-xp').textContent=fmt(S.xp)}
 let session=null,view='home',justCrowned=null;
 
@@ -672,7 +751,7 @@ function finish(passed,quit){const s=session;view='result';if(s.keyHandler){docu
   if(!s.review){const st=tstat(s.topic);st.sec+=sec;if(passed){st.lessons++;st.crowns=Math.min(5,st.crowns+1)}}
   if(xp>0||s.done>0){touchStreak();const d=S.days[todayKey()]||(S.days[todayKey()]={xp:0,sec:0,lessons:0});d.xp+=xp;d.sec+=sec;if(passed)d.lessons++;S.xp+=xp;S.log.unshift({d:todayKey(),t:s.topic,ok:s.firstTry,n:s.done,xp});S.log=S.log.slice(0,200)}
   if(!s.review&&passed)justCrowned=s.topic;
-  save();hdr();document.getElementById('st-xp').parentElement.classList.add('bump');
+  save();hdr();logLesson({topic:s.review?'review':s.topic,passed:!!passed&&!quit,first_try:s.firstTry,total:s.total,wrong:s.wrong,xp,seconds:sec});document.getElementById('st-xp').parentElement.classList.add('bump');
   if(passed&&!quit)setTimeout(confetti,250);
   const title=quit?'Урок прерван':passed?(s.wrong===0?'Без единой ошибки!':'Урок пройден!'):'Сердечки закончились';
   const sub=quit?'Прогресс по ответам сохранён, корону за урок не даём.':passed?(s.review?'Ошибки отработаны.':`Корона за § ${byId(s.topic).n} получена.`):'Ничего страшного. Посмотри объяснение и попробуй ещё раз — задания будут новые.';
@@ -691,6 +770,11 @@ function confetti(){if(matchMedia('(prefers-reduced-motion: reduce)').matches)re
     if(alive&&now-t0<4000)requestAnimationFrame(frame);else cv.remove()})(t0);setTimeout(()=>cv.remove(),3500)}
 
 /* ---------- parent ---------- */
+async function loadHistory(){const tb=document.getElementById('histbody');if(!tb)return;try{const {data,error}=await sb.from('lessons').select('*').eq('profile_id',cloud.profile.id).order('created_at',{ascending:false}).limit(40);if(error)throw error;
+    if(!data.length){tb.innerHTML='<tr><td colspan="5" class="muted">Уроков пока не было</td></tr>';return}
+    tb.innerHTML=data.map(r=>{const d=new Date(r.created_at);const t=r.topic==='review'?'Повторение':(byId(r.topic)?`§ ${byId(r.topic).n} ${byId(r.topic).title}`:r.topic);
+      return `<tr><td>${d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'})} ${d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</td><td>${t}</td><td class="r">${r.passed?'✓':'—'} ${r.first_try}/${r.total}</td><td class="r">${r.xp}</td><td class="r">${Math.round(r.seconds/60)}</td></tr>`}).join('')}
+  catch(e){tb.innerHTML='<tr><td colspan="5" class="muted">Не удалось загрузить историю</td></tr>'}}
 function renderParent(){view='parent';setNav('parent');
   const days=[];for(let i=13;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const k=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;days.push({k,l:d.getDate(),v:(S.days[k]||{xp:0,sec:0}).xp,sec:(S.days[k]||{sec:0}).sec})}
   const mx=Math.max(1,...days.map(d=>d.v));
@@ -698,11 +782,11 @@ function renderParent(){view='parent';setNav('parent');
   const weak=ACTIVE.map(t=>({t,st:tstat(t.id)})).filter(x=>x.st.asked>=6).map(x=>({...x,acc:x.st.correct/x.st.asked})).sort((a,b)=>a.acc-b.acc).slice(0,3);
   const totalSec=Object.values(S.days).reduce((a,d)=>a+(d.sec||0),0);
   app.innerHTML=`<div class="card parent"><h2>Для родителей</h2>
-    <section><h3>Профиль</h3><div class="row"><input type="text" id="pname" placeholder="Имя ребёнка" value="${esc(S.name)}"><button class="btn ghost sm" id="savename">Сохранить</button></div>
+    <section><h3>Профиль</h3><div class="row" ${HAS_SB&&cloud.profile?'hidden':''}><input type="text" id="pname" placeholder="Имя ребёнка" value="${esc(S.name)}"><button class="btn ghost sm" id="savename">Сохранить</button></div>
       <p class="sync ${cloud.status==='on'?'on':''}" style="margin:10px 0 0"><i></i><span></span></p></section>
-    ${SYNC_URL?`<section><h3>Семейный код</h3><p class="muted" style="margin:0 0 8px;font-size:14px">Один код на все устройства ребёнка: введи его на планшете, телефоне и ноутбуке — прогресс будет общим.</p>
-      <div class="row"><input type="text" id="famcode" placeholder="например, sova-417-kot" value="${esc(cloud.code||'')}"><button class="btn primary sm" id="setcode">Подключить</button><button class="btn ghost sm" id="gencode">Придумать код</button></div></section>`:''}
-    <section><h3>Перенос на другое устройство</h3><p class="muted" style="margin:0 0 8px;font-size:14px">Без семейного кода прогресс можно перенести вручную: скопируй его здесь и вставь на другом устройстве.</p>
+    ${HAS_SB?`<section><h3>Аккаунт</h3>${cloud.user?`<div class="row"><span class="muted" style="font-size:14px">${esc(cloud.user.email)} · профиль: <b>${esc(cloud.profile?.name||'—')}</b></span><button class="btn ghost sm" id="goprofiles">Профили</button><button class="btn ghost sm" id="signout2">Выйти</button></div>`:`<div class="row"><span class="muted" style="font-size:14px">Без аккаунта прогресс живёт только на этом устройстве.</span><button class="btn primary sm" id="gologin">Войти или создать аккаунт</button></div>`}</section>
+    <section id="histsec" ${cloud.profile?'':'hidden'}><h3>История уроков</h3><div class="tablewrap"><table class="hist"><thead><tr><th>Когда</th><th>Тема</th><th class="r">Итог</th><th class="r">XP</th><th class="r">Мин</th></tr></thead><tbody id="histbody"><tr><td colspan="5" class="muted">Загрузка…</td></tr></tbody></table></div></section>`:''}
+    <section ${HAS_SB&&cloud.profile?'hidden':''}><h3>Перенос на другое устройство</h3><p class="muted" style="margin:0 0 8px;font-size:14px">Без семейного кода прогресс можно перенести вручную: скопируй его здесь и вставь на другом устройстве.</p>
       <div class="row"><button class="btn ghost sm" id="copycode">Скопировать код</button><button class="btn ghost sm" id="showpaste">Вставить код</button><span id="codemsg" class="muted" style="font-size:13px"></span></div>
       <div id="pastebox" hidden style="margin-top:10px"><textarea class="code" id="pastecode" placeholder="Вставь код сюда"></textarea><div class="row" style="margin-top:8px"><button class="btn primary sm" id="doimport">Загрузить прогресс</button></div></div></section>
     <section><h3>Сводка</h3><div class="tiles"><div class="tile gold"><b>${fmt(S.xp)}</b><span>всего XP</span></div><div class="tile"><b>${streakShown()}</b><span>дней подряд</span></div><div class="tile"><b>${Math.round(totalSec/60)}</b><span>минут всего</span></div></div></section>
@@ -714,7 +798,9 @@ function renderParent(){view='parent';setNav('parent');
       <div class="confirm" id="confirm"><span>Точно удалить прогресс? Отменить будет нельзя.</span><button class="btn danger sm" id="reset-yes">Да, удалить</button><button class="btn ghost sm" id="reset-no">Отмена</button></div></section>
     <div class="actions"><button class="btn primary" id="back">К темам</button></div></div>`;
   setSync(cloud.status);
-  if(SYNC_URL){document.getElementById('setcode').addEventListener('click',()=>{if(setFamilyCode(document.getElementById('famcode').value))setTimeout(renderParent,800)});document.getElementById('gencode').addEventListener('click',()=>{document.getElementById('famcode').value=newFamilyCode()})}
+  if(HAS_SB){const gl=document.getElementById('gologin');if(gl)gl.addEventListener('click',()=>renderAuth());const gp=document.getElementById('goprofiles');if(gp)gp.addEventListener('click',renderProfiles);
+    const so=document.getElementById('signout2');if(so)so.addEventListener('click',async()=>{await sb.auth.signOut();cloud.user=null;cloud.profile=null;cloud.profiles=[];clearInterval(cloud.poll);try{localStorage.removeItem('pyaterka_profile')}catch(e){}renderAuth()});
+    if(cloud.profile)loadHistory()}
   document.getElementById('copycode').addEventListener('click',async()=>{const code=exportCode();const msg=document.getElementById('codemsg');try{await navigator.clipboard.writeText(code);msg.textContent='Скопировано'}catch(e){const box=document.getElementById('pastebox');box.hidden=false;const ta=document.getElementById('pastecode');ta.value=code;ta.select();msg.textContent='Выдели и скопируй код вручную'}});
   document.getElementById('showpaste').addEventListener('click',()=>{const box=document.getElementById('pastebox');box.hidden=false;document.getElementById('pastecode').value='';document.getElementById('pastecode').focus()});
   document.getElementById('doimport').addEventListener('click',()=>{const ok=importCode(document.getElementById('pastecode').value);document.getElementById('codemsg').textContent=ok?'Прогресс загружен':'Код не распознан';if(ok)renderParent()});
@@ -727,7 +813,7 @@ function renderParent(){view='parent';setNav('parent');
 document.getElementById('to-parent').addEventListener('click',renderParent);
 
 /* ---------- boot ---------- */
-renderHome();cloudInit();
+(async()=>{let handled=false;try{handled=await cloudInit()}catch(e){handled=false}if(!handled)renderHome()})();
 if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}))}
 </script>
 

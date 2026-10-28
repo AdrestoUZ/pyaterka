@@ -1,7 +1,0 @@
-name = "pyaterka-sync"
-main = "worker.js"
-compatibility_date = "2025-01-01"
-
-[[kv_namespaces]]
-binding = "PROGRESS"
-id = "ВСТАВЬ_ID_ИЗ_wrangler_kv_namespace_create"
