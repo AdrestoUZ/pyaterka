@@ -1,0 +1,30 @@
+{
+ "name": "Пятёрка — математика 5 класс",
+ "short_name": "Пятёрка",
+ "description": "Тренажёр по математике для 5 класса",
+ "lang": "ru",
+ "display": "standalone",
+ "orientation": "any",
+ "start_url": "./",
+ "scope": "./",
+ "background_color": "#f6f8f3",
+ "theme_color": "#2f9e5b",
+ "icons": [
+  {
+   "src": "icons/icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png"
+  },
+  {
+   "src": "icons/icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png"
+  },
+  {
+   "src": "icons/maskable-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "maskable"
+  }
+ ]
+}
